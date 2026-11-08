@@ -1,0 +1,13 @@
+[project]
+name = "yam-tui"
+version = "0.1.0"
+description = "Minimal TUI for controlling a Yamaha RX-V475 AV receiver"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+yam-tui = "yam_tui.app:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
