@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """Minimal curses TUI for Yamaha RX-V475 (XML /YamahaRemoteControl/ctrl API).
 
-Usage: yam-tui [receiver-ip]      (default: $YAMAHA_HOST or 192.168.0.94)
+Usage: yam-tui [receiver-ip] [switches]   (default host: $YAMAHA_HOST or 192.168.0.94)
+Without switches the TUI starts; with switches only those actions run (see --help).
 
 Keys:  p power   ↑/↓ volume   m mute   ←/→ or 0-9 input   s sound program
        o HDMI out on/off   r refresh   q quit
 """
+import argparse
 import curses
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -187,12 +190,125 @@ def main(scr, host):
             act(rx.set_input, names[(cur + step) % len(names)])
 
 
-def cli():
-    host = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("YAMAHA_HOST", "192.168.0.94")
+def _onoff(v):
+    return v == "on"
+
+
+def build_parser():
+    p = argparse.ArgumentParser(
+        prog="yam-tui",
+        description="Control a Yamaha RX-V475. Without action switches the TUI starts; "
+        "with one or more, only those actions are performed (in the order listed here).",
+    )
+    p.add_argument("host", nargs="?", default=os.environ.get("YAMAHA_HOST", "192.168.0.94"),
+                   help="receiver address (default: $YAMAHA_HOST or 192.168.0.94)")
+    tri = ["on", "off", "toggle"]
+    p.add_argument("-p", "--power", choices=tri, help="power on/off/toggle")
+    p.add_argument("-v", "--volume", type=float, metavar="DB",
+                   help="set absolute volume in dB (use --volume=-30 for negatives)")
+    p.add_argument("--vol-up", nargs="?", const=1, type=int, metavar="N",
+                   help="raise volume by N steps of 0.5 dB (default 1)")
+    p.add_argument("--vol-down", nargs="?", const=1, type=int, metavar="N",
+                   help="lower volume by N steps of 0.5 dB (default 1)")
+    p.add_argument("-m", "--mute", choices=tri, help="mute on/off/toggle")
+    p.add_argument("-i", "--input", metavar="NAME",
+                   help="select input by name (e.g. HDMI1, AV2, AUDIO) or hotkey digit 0-9")
+    p.add_argument("--next-input", action="store_true", help="select next input")
+    p.add_argument("--prev-input", action="store_true", help="select previous input")
+    p.add_argument("-s", "--program", metavar="NAME", help="select sound program by name")
+    p.add_argument("--next-program", action="store_true", help="select next sound program")
+    p.add_argument("-o", "--hdmi-out", choices=tri, help="HDMI out on/off/toggle")
+    p.add_argument("--list-inputs", action="store_true", help="print available inputs")
+    p.add_argument("--list-programs", action="store_true", help="print known sound programs")
+    p.add_argument("--status", action="store_true", help="print current status")
+    return p
+
+
+def _resolve(value, choices, what):
+    """Case-insensitive match of value against choices."""
+    for c in choices:
+        if c.lower() == value.lower():
+            return c
+    raise ValueError(f"unknown {what} {value!r}; choose from: {', '.join(choices)}")
+
+
+def run_actions(rx, a):
+    if a.list_programs:
+        print("\n".join(PROGRAMS))
+    st = None
+
+    def fresh():
+        nonlocal st
+        st = rx.status()
+        return st
+
+    if a.power:
+        on = not fresh()["power"] if a.power == "toggle" else _onoff(a.power)
+        rx.set_power(on)
+        if on:
+            time.sleep(1.5)  # receiver ignores commands while waking up
+        st = None
+    if a.volume is not None:
+        rx.set_volume(round(a.volume * 10 / VOL_STEP) * VOL_STEP)
+        st = None
+    for n, sign in ((a.vol_up, 1), (a.vol_down, -1)):
+        if n is not None:
+            rx.set_volume((st or fresh())["vol"] + sign * n * VOL_STEP)
+            st = None
+    if a.mute:
+        rx.set_mute(not fresh()["mute"] if a.mute == "toggle" else _onoff(a.mute))
+        st = None
+    if a.input or a.next_input or a.prev_input or a.list_inputs:
+        inputs = rx.inputs()
+        names = [p for p, _ in inputs]
+        if a.list_inputs:
+            for param, title in inputs:
+                print(f"{param:<10} {title}")
+        if a.input:
+            name = HOTKEYS.get(a.input, a.input)
+            rx.set_input(_resolve(name, names, "input"))
+            st = None
+        for flag, step in ((a.next_input, 1), (a.prev_input, -1)):
+            if flag:
+                cur_in = fresh()["input"]
+                cur = names.index(cur_in) if cur_in in names else 0
+                rx.set_input(names[(cur + step) % len(names)])
+                st = None
+    if a.program:
+        rx.set_program(_resolve(a.program, PROGRAMS, "program"))
+        st = None
+    if a.next_program:
+        prog = fresh()["program"]
+        cur = PROGRAMS.index(prog) if prog in PROGRAMS else -1
+        rx.set_program(PROGRAMS[(cur + 1) % len(PROGRAMS)])
+        st = None
+    if a.hdmi_out:
+        rx.set_hdmi_out(not fresh()["hdmi_out"] if a.hdmi_out == "toggle" else _onoff(a.hdmi_out))
+        st = None
+    if a.status:
+        s = fresh()
+        print(f"power:    {'on' if s['power'] else 'standby'}")
+        print(f"volume:   {s['vol'] / 10:+.1f} dB")
+        print(f"mute:     {'on' if s['mute'] else 'off'}")
+        print(f"input:    {s['input']}")
+        print(f"program:  {s['program']}{' (straight)' if s['straight'] else ''}")
+        print(f"hdmi out: {'on' if s['hdmi_out'] else 'off'}")
+
+
+def cli(argv=None):
+    parser = build_parser()
+    a = parser.parse_args(argv)
+    actions = {k: v for k, v in vars(a).items() if k != "host"}
+    if not any(v not in (None, False) for v in actions.values()):
+        try:
+            curses.wrapper(main, a.host)
+        except KeyboardInterrupt:
+            pass
+        return
     try:
-        curses.wrapper(main, host)
-    except KeyboardInterrupt:
-        pass
+        run_actions(Receiver(a.host), a)
+    except (urllib.error.URLError, OSError, ValueError, ET.ParseError) as e:
+        sys.exit(f"error: {type(e).__name__}: {getattr(e, 'reason', e)}")
 
 
 if __name__ == "__main__":
