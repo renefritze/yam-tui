@@ -24,6 +24,6 @@ RX-V475 is tested.
 
 ## Releases
 
-Every merge to `main` bumps the patch version from the latest `v*` git tag,
-tags the commit and publishes to PyPI. For a minor/major bump, push the tag
+Every merge to `main` bumps the patch version from the latest `v*` git tag
+(starting at `v0.1.0`), tags the commit and publishes to PyPI. For a minor/major bump, push the tag
 yourself (e.g. `git tag v0.2.0 && git push --tags`) before merging.

@@ -26,8 +26,12 @@ jobs:
             exit 0
           fi
           last=$(git tag --list 'v*' --sort=-v:refname | head -n1)
-          IFS=. read -r major minor patch <<< "${last#v}"
-          next="v${major}.${minor}.$((patch + 1))"
+          if [ -z "$last" ]; then
+            next="v0.1.0"
+          else
+            IFS=. read -r major minor patch <<< "${last#v}"
+            next="v${major}.${minor}.$((patch + 1))"
+          fi
           git tag "$next"
           git push origin "$next"
           echo "version=$next" >> "$GITHUB_OUTPUT"
