@@ -19,6 +19,24 @@ yam-tui 192.168.0.94        # or set YAMAHA_HOST
 | `o` | HDMI out on/off |
 | `q` | quit |
 
+## Command line
+
+Pass any of these switches to skip the TUI and just perform the action(s):
+
+```
+yam-tui --power on --input HDMI1 --volume=-35
+yam-tui --mute toggle
+yam-tui --vol-up 4            # 4 steps of 0.5 dB
+yam-tui --program "Chamber" --hdmi-out off
+yam-tui 192.168.0.94 --status
+```
+
+Switches: `-p/--power`, `-v/--volume DB`, `--vol-up [N]`, `--vol-down [N]`,
+`-m/--mute`, `-i/--input`, `--next-input`, `--prev-input`, `-s/--program`,
+`--next-program`, `-o/--hdmi-out`, `--list-inputs`, `--list-programs`,
+`--status`. `on|off|toggle` apply to power, mute and HDMI out. Put the host
+before `--vol-up`/`--vol-down`, or use `YAMAHA_HOST`.
+
 Other RX-V models using the same XML protocol will probably work, but only the
 RX-V475 is tested.
 
